@@ -53,6 +53,7 @@ lazy_static! {
         let num_app = get_num_app();
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
+            syscall_counts: [0; 512],
             task_status: TaskStatus::UnInit,
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
@@ -168,4 +169,21 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+
+/// Record one system call for the currently running task.
+pub fn record_syscall(id: usize) {
+    if id < 512 {
+        let mut inner = TASK_MANAGER.inner.exclusive_access();
+        let current = inner.current_task;
+        let count = &mut inner.tasks[current].syscall_counts[id];
+        *count = count.saturating_add(1);
+    }
+}
+
+/// Return the number of times the current task invoked a system call.
+pub fn syscall_count(id: usize) -> u32 {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    if id < 512 { inner.tasks[inner.current_task].syscall_counts[id] } else { 0 }
 }
