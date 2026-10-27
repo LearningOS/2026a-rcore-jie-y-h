@@ -15,6 +15,7 @@ pub trait File: Send + Sync {
     fn read(&self, buf: UserBuffer) -> usize;
     /// write to the file from buf, return the number of bytes written
     fn write(&self, buf: UserBuffer) -> usize;
+    /// Return inode id, hard-link count, and directory type when supported.
     fn stat(&self) -> Option<(u64, u32, bool)> {
         None
     }
@@ -37,6 +38,7 @@ pub struct Stat {
 }
 
 impl Stat {
+    /// Create a zero-initialized file status record.
     pub fn new() -> Self {
         Self {
             dev: 0,
