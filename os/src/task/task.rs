@@ -71,6 +71,8 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+    pub stride: usize,
+    pub priority: usize,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +137,8 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -216,6 +220,8 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
                 })
             },
         });

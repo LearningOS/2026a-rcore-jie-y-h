@@ -23,7 +23,7 @@ impl TaskManager {
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    /// Take the runnable process with the smallest stride.
+    /// Fetch the ready process with the smallest stride.
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
         let mut best = None;
         let mut best_stride = usize::MAX;
@@ -35,11 +35,10 @@ impl TaskManager {
             }
         }
         let task = self.ready_queue.remove(best?)?;
-        {
-            let mut inner = task.inner_exclusive_access();
-            let pass = (BIG_STRIDE / inner.priority.max(2)).max(1);
-            inner.stride = inner.stride.saturating_add(pass);
-        }
+        let mut inner = task.inner_exclusive_access();
+        let pass = (BIG_STRIDE / inner.priority.max(2)).max(1);
+        inner.stride = inner.stride.saturating_add(pass);
+        drop(inner);
         Some(task)
     }
 }

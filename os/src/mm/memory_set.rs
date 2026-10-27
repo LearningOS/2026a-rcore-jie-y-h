@@ -3,7 +3,7 @@ use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
+use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -30,6 +30,12 @@ lazy_static! {
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
+
+/// the kernel token
+pub fn kernel_token() -> usize {
+    KERNEL_SPACE.exclusive_access().token()
+}
+
 /// address space
 pub struct MemorySet {
     page_table: PageTable,
@@ -153,6 +159,18 @@ impl MemorySet {
             ),
             None,
         );
+        info!("mapping memory-mapped registers");
+        for pair in MMIO {
+            memory_set.push(
+                MapArea::new(
+                    (*pair).0.into(),
+                    ((*pair).0 + (*pair).1).into(),
+                    MapType::Identical,
+                    MapPermission::R | MapPermission::W,
+                ),
+                None,
+            );
+        }
         memory_set
     }
     /// Include sections in elf and trampoline and TrapContext and user stack,
@@ -253,7 +271,7 @@ impl MemorySet {
         }
         memory_set
     }
-    /// Map a page-aligned anonymous user range.
+    /// Map anonymous user pages and reject any existing mapping in the range.
     pub fn mmap(&mut self, start: usize, len: usize, permission: MapPermission) -> bool {
         if start % PAGE_SIZE != 0 {
             return false;
@@ -287,7 +305,7 @@ impl MemorySet {
         true
     }
 
-    /// Unmap a page-aligned anonymous range.
+    /// Remove a fully mapped anonymous range.
     pub fn munmap(&mut self, start: usize, len: usize) -> bool {
         if start % PAGE_SIZE != 0 {
             return false;
@@ -323,6 +341,7 @@ impl MemorySet {
         });
         true
     }
+
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {
         let satp = self.page_table.token();
