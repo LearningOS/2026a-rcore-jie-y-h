@@ -30,23 +30,50 @@ pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
     -1
 }
 
-/// TODO: Finish sys_trace to pass testcases
-/// HINT: You might reimplement it with virtual memory management.
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
-    trace!("kernel: sys_trace");
-    -1
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    match trace_request {
+        0 => crate::task::read_current_user_byte(id)
+            .map(|value| value as isize)
+            .unwrap_or(-1),
+        1 => {
+            if crate::task::write_current_user_byte(id, data as u8) {
+                0
+            } else {
+                -1
+            }
+        }
+        2 => crate::task::syscall_count(id) as isize,
+        _ => -1,
+    }
 }
 
-// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!("kernel: sys_mmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    if prot == 0 || prot & !0x7 != 0 {
+        return -1;
+    }
+    let mut permission = crate::mm::MapPermission::U;
+    if prot & 1 != 0 {
+        permission |= crate::mm::MapPermission::R;
+    }
+    if prot & 2 != 0 {
+        permission |= crate::mm::MapPermission::W;
+    }
+    if prot & 4 != 0 {
+        permission |= crate::mm::MapPermission::X;
+    }
+    if crate::task::mmap_current(start, len, permission) {
+        0
+    } else {
+        -1
+    }
 }
 
-// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!("kernel: sys_munmap NOT IMPLEMENTED YET!");
-    -1
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    if crate::task::munmap_current(start, len) {
+        0
+    } else {
+        -1
+    }
 }
 /// change data segment size
 pub fn sys_sbrk(size: i32) -> isize {

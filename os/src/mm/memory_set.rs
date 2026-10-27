@@ -221,6 +221,109 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
+    /// Map a page-aligned anonymous user range.
+    pub fn mmap(&mut self, start: usize, len: usize, permission: MapPermission) -> bool {
+        if start % PAGE_SIZE != 0 {
+            return false;
+        }
+        if len == 0 {
+            return true;
+        }
+        let Some(end) = start.checked_add(len) else {
+            return false;
+        };
+        if end > (1usize << 38) {
+            return false;
+        }
+        let start_vpn = VirtAddr::from(start).floor();
+        let end_vpn = VirtAddr::from(end).ceil();
+        let range = VPNRange::new(start_vpn, end_vpn);
+        if range.clone().any(|vpn| {
+            self.translate(vpn)
+                .map(|pte| pte.is_valid())
+                .unwrap_or(false)
+        }) {
+            return false;
+        }
+        self.push(
+            MapArea::new(
+                VirtAddr::from(start),
+                VirtAddr::from(end),
+                MapType::Framed,
+                permission | MapPermission::U,
+            ),
+            None,
+        );
+        true
+    }
+
+    /// Unmap a page-aligned anonymous range.
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        if start % PAGE_SIZE != 0 {
+            return false;
+        }
+        if len == 0 {
+            return true;
+        }
+        let Some(end) = start.checked_add(len) else {
+            return false;
+        };
+        if end > (1usize << 38) {
+            return false;
+        }
+        let range = VPNRange::new(VirtAddr::from(start).floor(), VirtAddr::from(end).ceil());
+        if range.clone().any(|vpn| {
+            !self
+                .areas
+                .iter()
+                .any(|area| area.map_type == MapType::Framed && area.data_frames.contains_key(&vpn))
+        }) {
+            return false;
+        }
+        for vpn in range {
+            let area = self
+                .areas
+                .iter_mut()
+                .find(|area| area.data_frames.contains_key(&vpn))
+                .unwrap();
+            area.unmap_one(&mut self.page_table, vpn);
+        }
+        self.areas.retain(|area| {
+            !area.data_frames.is_empty() || area.vpn_range.get_start() == area.vpn_range.get_end()
+        });
+        true
+    }
+
+    /// Read one byte from the current user address space.
+    pub fn read_user_byte(&self, addr: usize) -> Option<u8> {
+        if addr >= (1usize << 38) {
+            return None;
+        }
+        let va = VirtAddr::from(addr);
+        let pte = self.translate(va.floor())?;
+        let flags = pte.flags();
+        if !flags.contains(PTEFlags::U | PTEFlags::R) {
+            return None;
+        }
+        Some(pte.ppn().get_bytes_array()[va.page_offset()])
+    }
+
+    /// Write one byte to the current user address space.
+    pub fn write_user_byte(&self, addr: usize, value: u8) -> bool {
+        if addr >= (1usize << 38) {
+            return false;
+        }
+        let va = VirtAddr::from(addr);
+        let Some(pte) = self.translate(va.floor()) else {
+            return false;
+        };
+        let flags = pte.flags();
+        if !flags.contains(PTEFlags::U | PTEFlags::W) {
+            return false;
+        }
+        pte.ppn().get_bytes_array()[va.page_offset()] = value;
+        true
+    }
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {
         let satp = self.page_table.token();

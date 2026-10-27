@@ -202,3 +202,53 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
 }
+
+/// Map an anonymous range in the current task.
+pub fn mmap_current(start: usize, len: usize, permission: crate::mm::MapPermission) -> bool {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].memory_set.mmap(start, len, permission)
+}
+
+/// Unmap a range in the current task.
+pub fn munmap_current(start: usize, len: usize) -> bool {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let current = inner.current_task;
+    inner.tasks[current].memory_set.munmap(start, len)
+}
+
+/// Read one byte from the current task address space.
+pub fn read_current_user_byte(addr: usize) -> Option<u8> {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    inner.tasks[inner.current_task]
+        .memory_set
+        .read_user_byte(addr)
+}
+
+/// Write one byte to the current task address space.
+pub fn write_current_user_byte(addr: usize, value: u8) -> bool {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    inner.tasks[inner.current_task]
+        .memory_set
+        .write_user_byte(addr, value)
+}
+
+/// Record one system call for the currently running task.
+pub fn record_syscall(id: usize) {
+    if id < 512 {
+        let mut inner = TASK_MANAGER.inner.exclusive_access();
+        let current = inner.current_task;
+        let count = &mut inner.tasks[current].syscall_counts[id];
+        *count = count.saturating_add(1);
+    }
+}
+
+/// Return the current task count for a system call.
+pub fn syscall_count(id: usize) -> u32 {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    if id < 512 {
+        inner.tasks[inner.current_task].syscall_counts[id]
+    } else {
+        0
+    }
+}
