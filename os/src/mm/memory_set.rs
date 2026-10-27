@@ -238,7 +238,7 @@ impl MemorySet {
         let start_vpn = VirtAddr::from(start).floor();
         let end_vpn = VirtAddr::from(end).ceil();
         let range = VPNRange::new(start_vpn, end_vpn);
-        if range.clone().any(|vpn| {
+        if range.clone().into_iter().any(|vpn| {
             self.translate(vpn)
                 .map(|pte| pte.is_valid())
                 .unwrap_or(false)
@@ -272,7 +272,7 @@ impl MemorySet {
             return false;
         }
         let range = VPNRange::new(VirtAddr::from(start).floor(), VirtAddr::from(end).ceil());
-        if range.clone().any(|vpn| {
+        if range.clone().into_iter().any(|vpn| {
             !self
                 .areas
                 .iter()
