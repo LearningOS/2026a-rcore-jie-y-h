@@ -4,6 +4,8 @@ use crate::sync::UPSafeCell;
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use lazy_static::*;
+
+const BIG_STRIDE: usize = 1 << 20;
 ///A array of `TaskControlBlock` that is thread-safe
 pub struct TaskManager {
     ready_queue: VecDeque<Arc<TaskControlBlock>>,
@@ -21,9 +23,24 @@ impl TaskManager {
     pub fn add(&mut self, task: Arc<TaskControlBlock>) {
         self.ready_queue.push_back(task);
     }
-    /// Take a process out of the ready queue
+    /// Take the runnable process with the smallest stride.
     pub fn fetch(&mut self) -> Option<Arc<TaskControlBlock>> {
-        self.ready_queue.pop_front()
+        let mut best = None;
+        let mut best_stride = usize::MAX;
+        for (index, task) in self.ready_queue.iter().enumerate() {
+            let stride = task.inner_exclusive_access().stride;
+            if stride < best_stride {
+                best = Some(index);
+                best_stride = stride;
+            }
+        }
+        let task = self.ready_queue.remove(best?)?;
+        {
+            let mut inner = task.inner_exclusive_access();
+            let pass = (BIG_STRIDE / inner.priority.max(2)).max(1);
+            inner.stride = inner.stride.saturating_add(pass);
+        }
+        Some(task)
     }
 }
 
