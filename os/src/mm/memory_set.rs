@@ -3,7 +3,7 @@ use super::{frame_alloc, FrameTracker};
 use super::{PTEFlags, PageTable, PageTableEntry};
 use super::{PhysAddr, PhysPageNum, VirtAddr, VirtPageNum};
 use super::{StepByOne, VPNRange};
-use crate::config::{MEMORY_END, MMIO, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
+use crate::config::{MEMORY_END, PAGE_SIZE, TRAMPOLINE, TRAP_CONTEXT_BASE, USER_STACK_SIZE};
 use crate::sync::UPSafeCell;
 use alloc::collections::BTreeMap;
 use alloc::sync::Arc;
@@ -30,12 +30,6 @@ lazy_static! {
     pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
-
-/// the kernel token
-pub fn kernel_token() -> usize {
-    KERNEL_SPACE.exclusive_access().token()
-}
-
 /// address space
 pub struct MemorySet {
     page_table: PageTable,
@@ -159,18 +153,6 @@ impl MemorySet {
             ),
             None,
         );
-        info!("mapping memory-mapped registers");
-        for pair in MMIO {
-            memory_set.push(
-                MapArea::new(
-                    (*pair).0.into(),
-                    ((*pair).0 + (*pair).1).into(),
-                    MapType::Identical,
-                    MapPermission::R | MapPermission::W,
-                ),
-                None,
-            );
-        }
         memory_set
     }
     /// Include sections in elf and trampoline and TrapContext and user stack,
@@ -270,6 +252,76 @@ impl MemorySet {
             }
         }
         memory_set
+    }
+    /// Map a page-aligned anonymous user range.
+    pub fn mmap(&mut self, start: usize, len: usize, permission: MapPermission) -> bool {
+        if start % PAGE_SIZE != 0 {
+            return false;
+        }
+        if len == 0 {
+            return true;
+        }
+        let Some(end) = start.checked_add(len) else {
+            return false;
+        };
+        if end > (1usize << 38) {
+            return false;
+        }
+        let range = VPNRange::new(VirtAddr::from(start).floor(), VirtAddr::from(end).ceil());
+        if range.clone().into_iter().any(|vpn| {
+            self.translate(vpn)
+                .map(|pte| pte.is_valid())
+                .unwrap_or(false)
+        }) {
+            return false;
+        }
+        self.push(
+            MapArea::new(
+                VirtAddr::from(start),
+                VirtAddr::from(end),
+                MapType::Framed,
+                permission | MapPermission::U,
+            ),
+            None,
+        );
+        true
+    }
+
+    /// Unmap a page-aligned anonymous range.
+    pub fn munmap(&mut self, start: usize, len: usize) -> bool {
+        if start % PAGE_SIZE != 0 {
+            return false;
+        }
+        if len == 0 {
+            return true;
+        }
+        let Some(end) = start.checked_add(len) else {
+            return false;
+        };
+        if end > (1usize << 38) {
+            return false;
+        }
+        let range = VPNRange::new(VirtAddr::from(start).floor(), VirtAddr::from(end).ceil());
+        if range.clone().into_iter().any(|vpn| {
+            !self
+                .areas
+                .iter()
+                .any(|area| area.map_type == MapType::Framed && area.data_frames.contains_key(&vpn))
+        }) {
+            return false;
+        }
+        for vpn in range {
+            let area = self
+                .areas
+                .iter_mut()
+                .find(|area| area.data_frames.contains_key(&vpn))
+                .unwrap();
+            area.unmap_one(&mut self.page_table, vpn);
+        }
+        self.areas.retain(|area| {
+            !area.data_frames.is_empty() || area.vpn_range.get_start() == area.vpn_range.get_end()
+        });
+        true
     }
     /// Change page table by writing satp CSR Register.
     pub fn activate(&self) {

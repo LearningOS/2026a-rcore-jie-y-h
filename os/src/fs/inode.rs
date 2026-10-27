@@ -126,6 +126,14 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
 }
 
 impl File for OSInode {
+    fn stat(&self) -> Option<(u64, u32, bool)> {
+        let inner = self.inner.exclusive_access();
+        Some((
+            inner.inode.inode_id() as u64,
+            inner.inode.nlink(),
+            inner.inode.is_dir(),
+        ))
+    }
     fn readable(&self) -> bool {
         self.readable
     }
